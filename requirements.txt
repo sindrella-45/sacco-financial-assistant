@@ -1,0 +1,10 @@
+anthropic>=0.40.0        # Claude API (Person 2)
+gradio>=4.0.0            # Web UI (Person 3)
+pandas>=2.0.0            # CSV handling (Person 1 & 2)
+Jinja2>=3.1.0            # Prompt templates (Person 2)
+python-dotenv>=1.0.0     # Load .env secrets
+pypdf>=4.0.0             # PDF text extraction (Person 1)
+reportlab>=4.0.0         # PDF creation (Person 1)
+scikit-learn>=1.4.0      # TF-IDF for RAG (Person 1)
+numpy>=1.26.0            # Array maths
+pytest>=7.0.0            # Unit tests (Person 3)
