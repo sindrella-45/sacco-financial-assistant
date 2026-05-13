@@ -1,0 +1,17 @@
+The member wants help planning their budget. Here are their details:
+
+Monthly income: UGX {{ income | int | format_number }}
+Monthly expenses:
+{% for name, amount in expenses.items() %}
+  - {{ name }}: UGX {{ amount | int | format_number }}
+{% endfor %}
+
+Total expenses: UGX {{ total_expenses | int | format_number }}
+Monthly surplus / deficit: UGX {{ surplus | int | format_number }} ({{ status }})
+
+Based on this, give the member:
+1. A simple assessment of their current budget situation
+2. Two or three practical suggestions to reduce expenses or increase savings
+3. A realistic monthly savings target they can work toward
+
+Be encouraging. Many SACCO members are managing tight budgets — focus on small, achievable steps.
