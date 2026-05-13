@@ -1,2 +1,195 @@
-# sacco-financial-assistant
-AI-powered SACCO financial assistant with chatbot, budgeting, and loan tools
+# SACCO Financial Assistant
+
+An AI-powered financial assistant for SACCO members in Uganda.
+Helps members understand loans, plan budgets, and improve their financial literacy.
+
+---
+
+## Quick Start
+
+```bash
+# 1. Install all dependencies
+pip install -r requirements.txt
+
+# 2. Set up your API key
+cp .env.example .env
+# Open .env and paste your ANTHROPIC_API_KEY
+
+# 3. Build the PDF knowledge base  (Person 1 — run once)
+python ingest.py
+
+# 4. Launch the app
+python run.py
+# Then open http://localhost:7860
+```
+
+---
+
+## Team Handshakes
+
+These are the three agreed connection points between teammates.
+
+### Handshake 1 — Person 1 → Person 2  (RAG search)
+
+```python
+from app.services.rag_service import query
+
+context = query("How is SACCO loan interest calculated?")
+# Returns: str — relevant passages from the PDF knowledge base
+# Inject this into your Jinja2 prompt template as retrieved knowledge.
+```
+
+### Handshake 2 — Person 2 → Person 3  (Chat)
+
+```python
+from app.services.ai_service import chat
+
+reply = chat(
+    message="What is my loan balance?",
+    user_id="M001",
+    history=[
+        {"role": "user",      "content": "Hello"},
+        {"role": "assistant", "content": "Hi! How can I help you today?"},
+    ]
+)
+# Returns: str — the assistant's response
+```
+
+### Handshake 3 — Person 2 → Person 3  (User profile)
+
+```python
+from app.services.memory_service import load_user_profile
+
+profile = load_user_profile("M001")
+# Returns: dict with keys:
+#   user_id, name, age, occupation, monthly_income,
+#   loan_id, principal, interest_rate, tenure_months,
+#   start_date, status
+```
+
+---
+
+## CSV Schema Reference
+
+> **Note for Person 2:** `memory_service.load_user_profile()` should join
+> `users.csv` + `loans.csv` on `user_id` to build the full profile dict.
+
+### users.csv
+| Column | Type | Example |
+|---|---|---|
+| user_id | str | M001 |
+| name | str | Nakamya Grace |
+| age | int | 34 |
+| occupation | str | Teacher |
+| monthly_income | int (UGX) | 850000 |
+
+### loans.csv
+| Column | Type | Example |
+|---|---|---|
+| loan_id | str | L001 |
+| user_id | str | M001 |
+| principal | int (UGX) | 2000000 |
+| interest_rate | float (% p.a.) | 15 |
+| tenure_months | int | 12 |
+| start_date | date (YYYY-MM-DD) | 2024-01-15 |
+| status | str | active / paid |
+
+### budgets.csv
+| Column | Type | Example |
+|---|---|---|
+| user_id | str | M001 |
+| month | str | January |
+| year | int | 2024 |
+| income | int (UGX) | 868962 |
+| rent | int (UGX) | 105579 |
+| food | int (UGX) | 147073 |
+| transport | int (UGX) | 53146 |
+| school_fees | int (UGX) | 66756 |
+| loan_repayment | int (UGX) | 180517 |
+| savings | int (UGX) | 119841 |
+| other | int (UGX) | 20401 |
+
+### payments.csv
+| Column | Type | Example |
+|---|---|---|
+| payment_id | str | P0001 |
+| loan_id | str | L001 |
+| date | date (YYYY-MM-DD) | 2024-01-15 |
+| amount_paid | int (UGX) | 180517 |
+
+---
+
+## Budget Framework (for Person 3 — UI display)
+
+The app uses a **50 / 20 / 20 / 10** budget framework:
+
+| Category | Target | Example (UGX 850,000 income) |
+|---|---|---|
+| Needs (rent, food, transport, school fees) | 50% | UGX 425,000 |
+| Loan repayment | 20% | UGX 170,000 |
+| Savings | 20% | UGX 170,000 |
+| Personal / other | 10% | UGX 85,000 |
+
+If a member's loan repayment exceeds 20% of income, flag it as a warning.
+
+---
+
+## Project Structure
+
+```
+sacco-financial-assistant/
+│
+├── app/
+│   ├── ui/                    # Gradio interface tabs     (Person 3)
+│   │   ├── chatbot_ui.py
+│   │   ├── budget_ui.py
+│   │   ├── loan_ui.py
+│   │   └── summary_ui.py
+│   │
+│   ├── services/              # Business logic
+│   │   ├── rag_service.py     # Person 1 ← Handshake 1
+│   │   ├── ai_service.py      # Person 2 ← Handshake 2
+│   │   ├── memory_service.py  # Person 2 ← Handshake 3
+│   │   ├── budget_service.py  # Person 2
+│   │   ├── loan_service.py    # Person 2
+│   │   └── summary_service.py # Person 2
+│   │
+│   ├── prompts/               # Jinja2 prompt templates   (Person 2)
+│   │   ├── system_prompt.j2
+│   │   ├── budget_prompt.j2
+│   │   ├── loan_prompt.j2
+│   │   └── summary_prompt.j2
+│   │
+│   ├── data/                  # CSVs + PDFs               (Person 1)
+│   │   ├── pdfs/
+│   │   │   ├── loans_guide.pdf
+│   │   │   ├── budgeting_guide.pdf
+│   │   │   └── financial_literacy.pdf
+│   │   ├── users.csv
+│   │   ├── loans.csv
+│   │   ├── budgets.csv
+│   │   └── payments.csv
+│   │
+│   ├── utils/                 # Shared helpers            (Person 3)
+│   │   ├── helpers.py
+│   │   └── constants.py
+│   │
+│   └── config/
+│       └── settings.py        # Shared configuration      (shared)
+│
+├── tests/                     # Unit tests                (Person 3)
+├── chroma_db/                 # Auto-generated by ingest.py
+├── ingest.py                  # Run once                  (Person 1)
+├── run.py                     # App entry point           (Person 3)
+├── requirements.txt
+├── .env.example
+└── README.md
+```
+
+---
+
+## Running Tests
+
+```bash
+pytest tests/ -v
+```
