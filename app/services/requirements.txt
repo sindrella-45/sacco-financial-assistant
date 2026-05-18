@@ -1,0 +1,6 @@
+google-generativeai
+jinja2
+chromadb
+pandas
+python-dotenv
+gradio

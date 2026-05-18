@@ -132,9 +132,10 @@ def build_summary_ui() -> gr.Blocks:
             age        = p.get("age", "—")
             occupation = p.get("occupation", "—")
             income     = float(p.get("monthly_income", 0) or 0)
-            principal  = float(p.get("principal", 0) or 0)
+            # Support both real service keys and mock keys
+            principal  = float(p.get("loan_amount") or p.get("principal") or 0)
             rate       = float(p.get("interest_rate", 0) or 0)
-            tenure     = int(p.get("tenure_months", 0) or 0)
+            tenure     = int(p.get("loan_term_months") or p.get("tenure_months") or 0)
             start      = p.get("start_date", "—")
             status     = (p.get("status") or "—").upper()
 
