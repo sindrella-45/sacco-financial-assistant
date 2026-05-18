@@ -87,16 +87,13 @@ def build_chatbot_ui() -> gr.Blocks:
                 label="Member ID",
                 scale=1,
             )
-            status_badge = gr.Markdown(
-                "🟢 AI ready" if _CHAT_READY else "🟡 Running in demo mode (mock responses)",
-                scale=3,
-            )
+        gr.Markdown(
+            "🟢 AI ready" if _CHAT_READY else "🟡 Running in demo mode (mock responses)"
+        )
 
         chatbot = gr.Chatbot(
             label="SACCO Assistant",
-            type="messages",
             height=440,
-            show_copy_button=True,
         )
 
         with gr.Row():
@@ -115,9 +112,18 @@ def build_chatbot_ui() -> gr.Blocks:
                 return history, ""
 
             history = history or []
-            history.append({"role": "user", "content": message})
-            reply = _dispatch_chat(message=message, user_id=user_id, history=history)
-            history.append({"role": "assistant", "content": reply})
+
+            # Convert Gradio tuple history → handshake dict format for chat()
+            handshake_history = []
+            for turn in history:
+                if turn[0]:
+                    handshake_history.append({"role": "user",      "content": turn[0]})
+                if turn[1]:
+                    handshake_history.append({"role": "assistant", "content": turn[1]})
+            handshake_history.append({"role": "user", "content": message})
+
+            reply = _dispatch_chat(message=message, user_id=user_id, history=handshake_history)
+            history.append([message, reply])
             return history, ""
 
         send_btn.click(
