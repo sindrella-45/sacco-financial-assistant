@@ -1,112 +1,99 @@
-"""
-app/ui/budget_ui.py — Budget Planner tab (Person 3)
-=====================================================
-Gradio interface for the 50 / 20 / 20 / 10 budget framework.
-
-  50 % → Needs (rent, food, transport, school fees)
-  20 % → Loan repayment
-  20 % → Savings
-  10 % → Personal / other
-
-Flags a warning if loan repayment exceeds 20 % of income.
-No AI or external service calls — pure local calculation.
-"""
-
 import gradio as gr
-
-from app.utils.helpers import format_currency, pct_of, pct_share, format_pct
-from app.utils.constants import (
-    CURRENCY,
-    BUDGET_NEEDS_PCT,
-    BUDGET_LOAN_PCT,
-    BUDGET_SAVINGS_PCT,
-    BUDGET_PERSONAL_PCT,
-    LOAN_REPAYMENT_WARNING_PCT,
-)
+from app.services.budget_service import generate_budget, calculate_savings_potential
+from app.services.ai_service import explain_budget
 
 
-def build_budget_ui() -> gr.Blocks:
-    """Return a gr.Blocks component for the Budget Planner tab."""
+def build_budget_tab():
+    with gr.Column():
+        gr.Markdown("### Enter your monthly income and expenses")
 
-    with gr.Blocks() as budget_tab:
-        gr.Markdown("## Budget Planner")
-        gr.Markdown(
-            "Enter your **monthly income** and actual spending. "
-            "The **50 / 20 / 20 / 10** framework shows you where you stand."
-        )
+        income = gr.Number(label="Monthly income (UGX)", value=800000, minimum=0)
+
+        gr.Markdown("**Monthly expenses** — fill in what applies to you")
 
         with gr.Row():
-            with gr.Column(scale=1):
-                income_input      = gr.Number(label=f"Monthly Income ({CURRENCY})",        value=850_000, step=10_000,  minimum=0)
-                rent_input        = gr.Number(label=f"Rent ({CURRENCY})",                  value=0,       step=5_000,   minimum=0)
-                food_input        = gr.Number(label=f"Food ({CURRENCY})",                  value=0,       step=5_000,   minimum=0)
-                transport_input   = gr.Number(label=f"Transport ({CURRENCY})",             value=0,       step=5_000,   minimum=0)
-                school_fees_input = gr.Number(label=f"School Fees ({CURRENCY})",           value=0,       step=5_000,   minimum=0)
-                loan_input        = gr.Number(label=f"Loan Repayment ({CURRENCY})",        value=0,       step=5_000,   minimum=0)
-                savings_input     = gr.Number(label=f"Savings ({CURRENCY})",               value=0,       step=5_000,   minimum=0)
-                other_input       = gr.Number(label=f"Personal / Other ({CURRENCY})",      value=0,       step=5_000,   minimum=0)
-                calc_btn          = gr.Button("Analyse My Budget", variant="primary")
+            rent = gr.Number(label="Rent (UGX)", value=200000, minimum=0)
+            food = gr.Number(label="Food (UGX)", value=150000, minimum=0)
 
-            with gr.Column(scale=1):
-                result_md  = gr.Markdown("*Fill in your details and click Analyse.*")
-                warning_md = gr.Markdown(visible=False)
+        with gr.Row():
+            transport = gr.Number(label="Transport (UGX)", value=50000, minimum=0)
+            loan_repay = gr.Number(label="Loan repayment (UGX)", value=45840, minimum=0)
 
-        def _analyse(income, rent, food, transport, school_fees, loan, savings, other):
-            income = float(income or 0)
-            if income <= 0:
-                return "*Please enter a valid monthly income.*", gr.update(visible=False)
+        with gr.Row():
+            school = gr.Number(label="School fees (UGX)", value=0, minimum=0)
+            medical = gr.Number(label="Medical (UGX)", value=0, minimum=0)
 
-            needs   = sum(float(v or 0) for v in [rent, food, transport, school_fees])
-            loan    = float(loan or 0)
-            savings = float(savings or 0)
-            other   = float(other or 0)
-            total_spent = needs + loan + savings + other
+        with gr.Row():
+            utilities = gr.Number(label="Utilities / Airtime (UGX)", value=0, minimum=0)
+            other = gr.Number(label="Other expenses (UGX)", value=0, minimum=0)
 
-            # Targets
-            t_needs   = pct_of(income, BUDGET_NEEDS_PCT)
-            t_loan    = pct_of(income, BUDGET_LOAN_PCT)
-            t_savings = pct_of(income, BUDGET_SAVINGS_PCT)
-            t_other   = pct_of(income, BUDGET_PERSONAL_PCT)
+        analyse_btn = gr.Button("Analyse my budget", variant="primary")
 
-            def _status(actual: float, target: float, under_is_bad: bool = False) -> str:
-                if under_is_bad:
-                    return "✅" if actual >= target else "⚠️ Under target"
-                return "✅" if actual <= target else "⚠️ Over target"
+        with gr.Row():
+            total_exp_box = gr.Textbox(label="Total expenses", interactive=False)
+            surplus_box = gr.Textbox(label="Surplus / Deficit", interactive=False)
+            savings_box = gr.Textbox(label="Potential monthly savings", interactive=False)
 
-            result = f"""
-### Budget Analysis — {format_currency(income)} / month
-
-| Category | Your Amount | Target ({{}}) | Target Amount | Status |
-|---|---|---|---|---|
-| Needs (rent + food + transport + fees) | {format_currency(needs)} | 50 % | {format_currency(t_needs)} | {_status(needs, t_needs)} |
-| Loan Repayment | {format_currency(loan)} | 20 % | {format_currency(t_loan)} | {_status(loan, t_loan)} |
-| Savings | {format_currency(savings)} | 20 % | {format_currency(t_savings)} | {_status(savings, t_savings, under_is_bad=True)} |
-| Personal / Other | {format_currency(other)} | 10 % | {format_currency(t_other)} | {_status(other, t_other)} |
-
-**Total spending:** {format_currency(total_spent)} &nbsp;|&nbsp; **Unaccounted:** {format_currency(max(0, income - total_spent))}
-"""
-
-            warning = gr.update(visible=False)
-            if pct_share(loan, income) > LOAN_REPAYMENT_WARNING_PCT:
-                warning = gr.update(
-                    value=(
-                        f"> **Warning:** Your loan repayment is "
-                        f"**{format_pct(pct_share(loan, income))}** of your income, "
-                        "which exceeds the recommended 20 %. "
-                        "Consider speaking to your SACCO officer about restructuring your loan."
-                    ),
-                    visible=True,
-                )
-
-            return result, warning
-
-        calc_btn.click(
-            fn=_analyse,
-            inputs=[
-                income_input, rent_input, food_input, transport_input,
-                school_fees_input, loan_input, savings_input, other_input,
-            ],
-            outputs=[result_md, warning_md],
+        budget_status = gr.Textbox(
+            label="Budget status",
+            interactive=False,
+            lines=1,
+            placeholder="Status will appear here..."
         )
 
-    return budget_tab
+        ai_advice = gr.Textbox(
+            label="AI budget advice",
+            interactive=False,
+            lines=5,
+            placeholder="Personalised budget advice will appear here..."
+        )
+
+        breakdown = gr.Dataframe(
+            headers=["Category", "Recommended (UGX)", "% of Income"],
+            label="Recommended budget breakdown",
+            interactive=False,
+        )
+
+        def analyse(inc, r, f, tr, lr, sc, med, ut, oth):
+            expenses = {}
+            if r: expenses["Rent"] = r
+            if f: expenses["Food"] = f
+            if tr: expenses["Transport"] = tr
+            if lr: expenses["Loan repayment"] = lr
+            if sc: expenses["School fees"] = sc
+            if med: expenses["Medical"] = med
+            if ut: expenses["Utilities"] = ut
+            if oth: expenses["Other"] = oth
+
+            if not inc:
+                return "—", "—", "—", "Please enter your income.", "", []
+
+            budget = generate_budget(inc, expenses)
+            savings = calculate_savings_potential(inc, expenses)
+            surplus = budget["surplus"]
+            status = "✅ You are in surplus — good position!" if surplus >= 0 else "⚠️ You are in deficit — expenses exceed income."
+
+            try:
+                advice = explain_budget(inc, expenses)
+            except Exception as e:
+                advice = f"AI advice unavailable: {str(e)}"
+
+            table = [
+                [cat.replace("_", " ").title(), f"{amt:,.0f}", f"{(amt/inc*100):.0f}%"]
+                for cat, amt in budget["recommended_allocations"].items()
+            ]
+
+            return (
+                f"UGX {budget['total_expenses']:,.0f}",
+                f"UGX {abs(surplus):,.0f} {'surplus' if surplus >= 0 else 'deficit'}",
+                f"UGX {savings:,.0f}",
+                status,
+                advice,
+                table,
+            )
+
+        analyse_btn.click(
+            analyse,
+            inputs=[income, rent, food, transport, loan_repay, school, medical, utilities, other],
+            outputs=[total_exp_box, surplus_box, savings_box, budget_status, ai_advice, breakdown],
+        )

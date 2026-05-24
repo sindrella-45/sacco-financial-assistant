@@ -1,95 +1,80 @@
-"""
-app/ui/loan_ui.py — Loan Calculator tab (Person 3)
-====================================================
-Gradio interface for calculating monthly EMI and total interest
-using the reducing-balance method.
-
-No AI or RAG calls — pure local math via helpers.py.
-"""
-
 import gradio as gr
+from app.services.loan_service import (
+    calculate_monthly_payment,
+    calculate_total_interest,
+    generate_repayment_schedule,
+)
+from app.services.ai_service import explain_loan
 
-from app.utils.helpers import format_currency, monthly_repayment, total_interest
-from app.utils.constants import CURRENCY
 
-
-def build_loan_ui() -> gr.Blocks:
-    """Return a gr.Blocks component for the Loan Calculator tab."""
-
-    with gr.Blocks() as loan_tab:
-        gr.Markdown("## Loan Calculator")
-        gr.Markdown(
-            "Calculate your **monthly repayment** and **total interest** "
-            "using the reducing-balance (EMI) method used by most SACCOs."
-        )
+def build_loan_tab():
+    with gr.Column():
+        gr.Markdown("### Enter your loan details")
 
         with gr.Row():
-            with gr.Column(scale=1):
-                principal_input = gr.Number(
-                    label=f"Loan Principal ({CURRENCY})",
-                    value=2_000_000,
-                    minimum=100_000,
-                    step=100_000,
-                )
-                rate_input = gr.Number(
-                    label="Annual Interest Rate (%)",
-                    value=15.0,
-                    minimum=1.0,
-                    maximum=50.0,
-                    step=0.5,
-                )
-                tenure_input = gr.Number(
-                    label="Loan Tenure (months)",
-                    value=12,
-                    minimum=1,
-                    maximum=120,
-                    step=1,
-                    precision=0,
-                )
-                calc_btn = gr.Button("Calculate", variant="primary")
+            principal = gr.Number(label="Loan amount (UGX)", value=500000, minimum=0)
+            rate = gr.Number(label="Annual interest rate (%)", value=18, minimum=0, maximum=100)
 
-            with gr.Column(scale=1):
-                monthly_out  = gr.Textbox(label="Monthly Repayment",    interactive=False)
-                total_out    = gr.Textbox(label="Total Amount Repayable", interactive=False)
-                interest_out = gr.Textbox(label="Total Interest Paid",   interactive=False)
-                warning_md   = gr.Markdown(visible=False)
+        with gr.Row():
+            term = gr.Number(label="Loan term (months)", value=12, minimum=1)
+            start = gr.Textbox(label="Start date (optional)", placeholder="e.g. Jan 2025")
 
-        def _calculate(principal, rate, tenure):
-            principal = float(principal or 0)
-            rate      = float(rate or 0)
-            tenure    = int(tenure or 0)
+        calc_btn = gr.Button("Calculate repayment plan", variant="primary")
 
-            if principal <= 0 or rate <= 0 or tenure <= 0:
-                return "—", "—", "—", gr.update(visible=False)
+        with gr.Row():
+            monthly_box = gr.Textbox(label="Monthly payment", interactive=False)
+            interest_box = gr.Textbox(label="Total interest", interactive=False)
+            total_box = gr.Textbox(label="Total to repay", interactive=False)
 
-            monthly  = monthly_repayment(principal, rate, tenure)
-            interest = total_interest(principal, monthly, tenure)
-            total    = round(monthly * tenure, 2)
+        ai_explanation = gr.Textbox(
+            label="AI explanation",
+            interactive=False,
+            lines=4,
+            placeholder="Your personalised loan explanation will appear here..."
+        )
 
-            # Warn if total interest exceeds 25 % of principal
-            warning = gr.update(visible=False)
-            if interest > 0 and interest / principal > 0.25:
-                pct = interest / principal * 100
-                warning = gr.update(
-                    value=(
-                        f"> **Note:** You will pay **{pct:.1f}%** of your principal "
-                        "in interest. Consider a shorter tenure or extra repayments "
-                        "to reduce the total cost."
-                    ),
-                    visible=True,
-                )
+        schedule_output = gr.Dataframe(
+            headers=["Month", "Payment (UGX)", "Principal (UGX)", "Interest (UGX)", "Balance (UGX)"],
+            label="Month-by-month repayment schedule",
+            interactive=False,
+            wrap=True,
+        )
+
+        def calculate(p, r, t):
+            if not p or not r or not t:
+                return "—", "—", "—", "Fill in all fields above.", []
+
+            monthly = calculate_monthly_payment(p, r, int(t))
+            interest = calculate_total_interest(p, r, int(t))
+            total = p + interest
+
+            try:
+                explanation = explain_loan(p, r, int(t))
+            except Exception as e:
+                explanation = f"AI explanation unavailable: {str(e)}"
+
+            schedule = generate_repayment_schedule(p, r, int(t))
+            table = [
+                [
+                    row["month"],
+                    f"{row['payment']:,.0f}",
+                    f"{row['principal_paid']:,.0f}",
+                    f"{row['interest_paid']:,.0f}",
+                    f"{row['balance']:,.0f}",
+                ]
+                for row in schedule
+            ]
 
             return (
-                format_currency(monthly),
-                format_currency(total),
-                format_currency(interest),
-                warning,
+                f"UGX {monthly:,.0f}",
+                f"UGX {interest:,.0f}",
+                f"UGX {total:,.0f}",
+                explanation,
+                table,
             )
 
         calc_btn.click(
-            fn=_calculate,
-            inputs=[principal_input, rate_input, tenure_input],
-            outputs=[monthly_out, total_out, interest_out, warning_md],
+            calculate,
+            inputs=[principal, rate, term],
+            outputs=[monthly_box, interest_box, total_box, ai_explanation, schedule_output],
         )
-
-    return loan_tab

@@ -1,34 +1,34 @@
-import google.generativeai as genai
+from groq import Groq
 from jinja2 import Environment, FileSystemLoader
 
-from app.config.settings import API_KEY, MODEL_NAME, PROMPTS_DIR
+from app.config.settings import API_KEY, MODEL_NAME, MAX_TOKENS, PROMPTS_DIR
 from app.services.memory_service import load_user_profile, build_memory_context
 from app.services.rag_service import query as rag_query
 
 # Jinja2 environment for loading prompt templates
 env = Environment(loader=FileSystemLoader(PROMPTS_DIR))
-
-# Add a number formatting filter to Jinja2
 env.filters["format_number"] = lambda value: f"{value:,.0f}"
 
-# Configure Gemini
-genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel(MODEL_NAME)
+# Lazy client — initialised on first use so missing key doesn't crash on import
+_client = None
+
+def _get_client():
+    global _client
+    if _client is None:
+        if not API_KEY:
+            raise ValueError("GROQ_API_KEY not set. Add it to your .env file.")
+        _client = Groq(api_key=API_KEY)
+    return _client
 
 
-def _build_history(history: list) -> list:
-    """
-    Convert history from {"role": "user/assistant", "content": "..."}
-    to Gemini's format {"role": "user/model", "parts": ["..."]}
-    """
-    gemini_history = []
-    for msg in history:
-        role = "model" if msg["role"] == "assistant" else "user"
-        gemini_history.append({
-            "role": role,
-            "parts": [msg["content"]]
-        })
-    return gemini_history
+def _call(messages: list) -> str:
+    """Single helper that calls Groq and returns the text response."""
+    response = _get_client().chat.completions.create(
+        model=MODEL_NAME,
+        max_tokens=MAX_TOKENS,
+        messages=messages
+    )
+    return response.choices[0].message.content
 
 
 def chat(message: str, user_id: str, history: list) -> str:
@@ -37,46 +37,36 @@ def chat(message: str, user_id: str, history: list) -> str:
 
     Args:
         message:  The user's current message
-        user_id:  Identifier for the current user (used to load their profile)
-        history:  List of prior messages in the format:
+        user_id:  Identifier for the current user
+        history:  List of prior messages:
                   [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
 
     Returns:
         The assistant's reply as a plain string.
     """
-    # 1. Load what we know about the user
     profile = load_user_profile(user_id)
     memory_context = build_memory_context(profile)
-
-    # 2. Search documents for relevant context
     rag_context = rag_query(message)
 
-    # 3. Build the system prompt from template
     template = env.get_template("system_prompt.j2")
     system_prompt = template.render(
         memory_context=memory_context,
         rag_context=rag_context
     )
 
-    # 4. Start a chat session with history and system prompt injected
-    chat_session = model.start_chat(history=_build_history(history))
+    messages = [{"role": "system", "content": system_prompt}]
+    messages += history
+    messages.append({"role": "user", "content": message})
 
-    # Prepend system prompt to the user message on first turn
-    full_message = f"{system_prompt}\n\nMember: {message}" if not history else message
-
-    response = chat_session.send_message(full_message)
-    return response.text
+    return _call(messages)
 
 
 def explain_loan(principal: float, interest_rate: float, term_months: int) -> str:
-    """
-    Generate a plain English explanation of a loan using the loan prompt template.
-    Called by the loan UI tab.
-    """
+    """Generate a plain English loan explanation."""
     from app.services.loan_service import calculate_monthly_payment, calculate_total_interest
 
     monthly_payment = calculate_monthly_payment(principal, interest_rate, term_months)
-    total_interest = calculate_total_interest(principal, interest_rate, term_months)
+    total_interest  = calculate_total_interest(principal, interest_rate, term_months)
 
     template = env.get_template("loan_prompt.j2")
     prompt = template.render(
@@ -87,15 +77,11 @@ def explain_loan(principal: float, interest_rate: float, term_months: int) -> st
         total_interest=total_interest
     )
 
-    response = model.generate_content(prompt)
-    return response.text
+    return _call([{"role": "user", "content": prompt}])
 
 
 def explain_budget(income: float, expenses: dict) -> str:
-    """
-    Generate personalised budget advice using the budget prompt template.
-    Called by the budget UI tab.
-    """
+    """Generate personalised budget advice."""
     from app.services.budget_service import generate_budget
 
     budget = generate_budget(income, expenses)
@@ -109,5 +95,15 @@ def explain_budget(income: float, expenses: dict) -> str:
         status=budget["status"]
     )
 
-    response = model.generate_content(prompt)
-    return response.text
+    return _call([{"role": "user", "content": prompt}])
+
+
+def generate_summary(user_id: str) -> str:
+    """Generate a personalised financial summary."""
+    profile = load_user_profile(user_id)
+    memory_context = build_memory_context(profile)
+
+    template = env.get_template("summary_prompt.j2")
+    prompt = template.render(memory_context=memory_context)
+
+    return _call([{"role": "user", "content": prompt}])
